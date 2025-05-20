@@ -1,11 +1,12 @@
-import { Action, Color, Icon, Keyboard, showToast, Toast } from "@raycast/api";
+import { Action, Color, Clipboard, Icon, Keyboard, showToast, showHUD, Toast } from "@raycast/api";
 import React from "react";
-import { gitlab } from "../common";
+import { getGitLabGQL, gitlab } from "../common";
 import { Label, MergeRequest } from "../gitlabapi";
 import { GitLabIcons } from "../icons";
 import { getErrorMessage, showErrorToast } from "../utils";
 import { ProjectCommitList } from "./commits/list";
 import { LabelList } from "./label";
+import { gql } from "@apollo/client";
 
 /* eslint-disable @typescript-eslint/no-explicit-any,@typescript-eslint/explicit-module-boundary-types */
 
@@ -141,9 +142,45 @@ export function MRItemActions(props: { mr: MergeRequest; onDataChange?: () => vo
       <Action.CopyToClipboard title="Copy Merge Request Number" content={mr.iid} />
       <Action.CopyToClipboard title="Copy Merge Request URL" content={mr.web_url} />
       <Action.CopyToClipboard title="Copy Merge Request Title" content={mr.title} />
+      <CopyMRLinkAction shortcut={{ modifiers: ["ctrl"], key: "l" }} mr={mr} />
       <ShowMRCommitsAction mr={mr} />
       <ShowMRLabelsAction labels={mr.labels} />
     </React.Fragment>
+  );
+}
+
+const GET_MR_DIFF = gql`
+  query GetMRDiff($id: MergeRequestID!) {
+    mergeRequest(id: $id) {
+      diffStatsSummary {
+        additions
+        deletions
+      }
+      project { name }
+    }
+  }
+`;
+
+export function CopyMRLinkAction(props: { mr: MergeRequest; shortcut?: Keyboard.Shortcut }): JSX.Element {
+  const mr = props.mr;
+  async function handleAction() {
+    try {
+        const data = await getGitLabGQL().client.query({
+            query: GET_MR_DIFF,
+            variables: { id: `gid://gitlab/MergeRequest/${mr.id}` },
+        });
+        const additions = data.data.mergeRequest.diffStatsSummary.additions;
+        const deletions = data.data.mergeRequest.diffStatsSummary.deletions;
+        const project_name = data.data.mergeRequest.project.name;
+        const content: Clipboard.Content = { text: mr.web_url, html: `<a href="${mr.web_url}">${project_name}: ${mr.title}</a> <code>+${additions} -${deletions}</code>`};
+        await Clipboard.copy(content);
+        await showHUD("HTML Link copied!");
+    } catch (error) {
+      showErrorToast(getErrorMessage(error), "Copy has failed");
+    }
+  }
+  return (
+    <Action title="Copy Merge Request Link as HTML" shortcut={props.shortcut} icon={{ source: Icon.CopyClipboard }} onAction={handleAction} />
   );
 }
 
